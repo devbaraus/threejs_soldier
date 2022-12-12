@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <title>Prova Three.JS</title>
+    <meta charset="utf-8">
+    <meta content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0" name="viewport">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+<div id="container"></div>
+<div id="speed">
+    <button id="slow_motion">Slow Motion</button>
+    <button id="fast_motion">Fast Motion</button>
+</div>
+<script type="module">
+    document.querySelector('#slow_motion').addEventListener('click', () => {
+        speedButton = 'slow';
+    });
+
+    document.querySelector('#fast_motion').addEventListener('click', () => {
+        speedButton = 'fast';
+    });
+
+    import * as THREE from './build/three.module.js';
+
+    import {GLTFLoader} from './jsm/loaders/GLTFLoader.js';
+    import * as SkeletonUtils from './jsm/utils/SkeletonUtils.js';
+
+    //////////////////////////////
+    // Global objects
+    //////////////////////////////
+    let worldScene = null; // THREE.Scene where it all will be rendered
+    let renderer = null;
+    let camera = null;
+    let clock = null;
+    let mixer = null;
+    let timeScale = 1.0;
+    let speedButton = 'slow';
+    let speedReseting = false;
+
+    //////////////////////////////
+
+
+    function slowMotion() {
+        if (timeScale <= 0.1) {
+            speedReseting = true;
+            timeScale += 0.01;
+        }
+        if (timeScale < 1 && speedReseting) {
+            timeScale += 0.01;
+        } else {
+            speedReseting = false;
+            timeScale -= 0.01;
+        }
+    }
+
+    function fastMotion() {
+        if (timeScale >= 2) {
+            speedReseting = true;
+            timeScale -= 0.01;
+        }
+        if (timeScale > 1 && speedReseting) {
+            timeScale -= 0.01;
+        } else {
+            speedReseting = false;
+            timeScale += 0.01;
+        }
+        console.log('fast', timeScale, speedReseting)
+    }
+
+    //////////////////////////////
+    // Information about our 3D models and units
+    //////////////////////////////
+
+    // The names of the 3D models to load. One-per file.
+    // A model may have multiple SkinnedMesh objects as well as several rigs (armatures). Units will define which
+    // meshes, armatures and animations to use. We will load the whole scene for each object and clone it for each unit.
+    // Models are from https://www.mixamo.com/
+    const soldier = {
+        name: "Soldier",
+        url: "models/gltf/Soldier.glb",
+        meshName: "vanguard_Mesh",
+        position: {x: 0, y: 0, z: 0},
+        scale: 2,
+        animationName: "Walk"
+    };
+
+    const loader = new GLTFLoader();
+
+    loader.load(soldier.url, function (gltf) {
+        soldier.animations = gltf.animations;
+        soldier.scene = gltf.scene;
+
+        // Enable Shadows
+
+        gltf.scene.traverse(function (object) {
+            if (object.isMesh) {
+                object.castShadow = true;
+            }
+        });
+
+        console.log("Done loading model");
+
+        instantiateUnits();
+    });
+
+
+    //////////////////////////////
+    // The main setup happens here
+    //////////////////////////////
+    initScene();
+    initRenderer();
+    animate();
+
+    //////////////////////////////
+
+    /**
+     * Look at UNITS configuration, clone necessary 3D model scenes, place the armatures and meshes in the scene and
+     * launch necessary animations
+     */
+    function instantiateUnits() {
+        if (soldier.scene) {
+            const mesh = soldier.scene.getObjectByName(soldier.meshName);
+
+            if (mesh) {
+                mixer = startAnimation(mesh, soldier.animations, soldier.animationName);
+            }
+
+            // Different models can have different configurations of armatures and meshes. Therefore,
+            // We can't set position, scale or rotation to individual mesh objects. Instead we set
+            // it to the whole cloned scene and then add the whole scene to the game world
+            // Note: this may have weird effects if you have lights or other items in the GLTF file's scene!
+            worldScene.add(soldier.scene);
+
+            if (soldier.position) {
+                soldier.scene.position.set(soldier.position.x, soldier.position.y, soldier.position.z);
+            }
+
+            if (soldier.scale) {
+                soldier.scene.scale.set(soldier.scale, soldier.scale, soldier.scale);
+            }
+
+            if (soldier.rotation) {
+                soldier.scene.rotation.x = soldier.rotation.x;
+                soldier.scene.rotation.y = soldier.rotation.y;
+                soldier.scene.rotation.z = soldier.rotation.z;
+            }
+        }
+    }
+
+    /**
+     * Start animation for a specific mesh object. Find the animation by name in the 3D model's animation array
+     * @param skinnedMesh {THREE.SkinnedMesh} The mesh to animate
+     * @param animations {Array} Array containing all the animations for this model
+     * @param animationName {string} Name of the animation to launch
+     * @return {THREE.AnimationMixer} Mixer to be used in the render loop
+     */
+    function startAnimation(skinnedMesh, animations, animationName) {
+
+        const mixer = new THREE.AnimationMixer(skinnedMesh);
+        const clip = THREE.AnimationClip.findByName(animations, animationName);
+
+        if (clip) {
+
+            const action = mixer.clipAction(clip);
+            action.play();
+
+        }
+
+        return mixer;
+
+    }
+
+    /**
+     * Render loop. Renders the next frame of all animations
+     */
+    function animate() {
+
+        requestAnimationFrame(animate);
+
+        // Get the time elapsed since the last frame
+
+        const mixerUpdateDelta = clock.getDelta();
+
+        // Update all the animation frames
+
+        if (mixer) {
+            mixer.update(mixerUpdateDelta);
+            mixer.timeScale = timeScale;
+
+
+            if (speedButton === 'slow') {
+                slowMotion();
+            } else if (speedButton === 'fast') {
+                fastMotion();
+            }
+
+            console.log(speedButton, timeScale, speedReseting)
+        }
+
+        renderer.render(worldScene, camera);
+
+    }
+
+    //////////////////////////////
+    // General Three.JS stuff
+    //////////////////////////////
+    // This part is not anyhow related to the cloning of models, it's just setting up the scene.
+
+    /**
+     * Initialize ThreeJS scene renderer
+     */
+    function initRenderer() {
+
+        const container = document.getElementById('container');
+        renderer = new THREE.WebGLRenderer({antialias: true});
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.outputEncoding = THREE.sRGBEncoding;
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        container.appendChild(renderer.domElement);
+
+    }
+
+    /**
+     * Initialize ThreeJS THREE.Scene
+     */
+    function initScene() {
+
+        camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 10000);
+        camera.position.set(3, 6, -10);
+        camera.lookAt(0, 1, 0);
+
+        clock = new THREE.Clock();
+
+        worldScene = new THREE.Scene();
+        worldScene.background = new THREE.Color(0xa0a0a0);
+        worldScene.fog = new THREE.Fog(0xa0a0a0, 10, 22);
+
+        const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444);
+        hemiLight.position.set(0, 20, 0);
+        worldScene.add(hemiLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff);
+        dirLight.position.set(-3, 10, -10);
+        dirLight.castShadow = true;
+        dirLight.shadow.camera.top = 10;
+        dirLight.shadow.camera.bottom = -10;
+        dirLight.shadow.camera.left = -10;
+        dirLight.shadow.camera.right = 10;
+        dirLight.shadow.camera.near = 0.1;
+        dirLight.shadow.camera.far = 40;
+        worldScene.add(dirLight);
+
+        // ground
+        const groundMesh = new THREE.Mesh(
+            new THREE.PlaneGeometry(40, 40),
+            new THREE.MeshPhongMaterial({
+                color: 0x999999,
+                depthWrite: false
+            })
+        );
+
+        groundMesh.rotation.x = -Math.PI / 2;
+        groundMesh.receiveShadow = true;
+        worldScene.add(groundMesh);
+        window.addEventListener('resize', onWindowResize);
+
+    }
+
+    /**
+     * A callback that will be called whenever the browser window is resized.
+     */
+    function onWindowResize() {
+
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+
+    }
+
+</script>
+
+</body>
+
+</html>
